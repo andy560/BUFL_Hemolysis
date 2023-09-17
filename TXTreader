@@ -1,3 +1,12 @@
+% given values
+Q_given = 2;    %vol. flow rate for first vial (should be 2ml/min)
+A = 1;          %syringe area
+R = 1;          %needle radius
+L = 1;          %length of needle
+
+vial_size = 1.4;  %volume of each vial
+
+
 % Prompt the user to select a .txt file
 [file, path] = uigetfile('*.txt', 'Select a .txt file');
 
@@ -17,13 +26,12 @@ splitstrings = strsplit(fctrim);
 data = zeros(numel(splitstrings)/3, 3);
 
 for i = 1:numel(splitstrings)/3
-    data(i, 1) = str2num(splitstrings{3*i-2}(6:end));
-    data(i, 2) = str2num(splitstrings{3*i-1}(3:end));
-    data(i, 3) = str2num(splitstrings{3*i}(9:end));
+    data(i, 1) = str2double(splitstrings{3*i-2}(6:end));
+    data(i, 2) = str2double(splitstrings{3*i-1}(3:end));
+    data(i, 3) = str2double(splitstrings{3*i}(9:end));
 end
 
-%% 
-
+ %{  
 subplot(1, 3, 1);
     plot(data(:,3), data(:,1), 'r-')
     hold on
@@ -39,8 +47,117 @@ subplot(1, 3, 2);
     title('Raw Values Manually Fit to Force')
 
 subplot(1, 3, 3);
+ %}
     plot(data(:,3), data(:,1), 'r-')
     hold off
     title('Force Values Only')
 
 
+%% tare force graph
+nullStart = input("Enter starting x value for tare: ");
+nullEnd = input("Enter end x value for tare: ");
+[rStart, cStart] = find(data == nullStart);
+[rEnd, cEnd] = find(data == nullEnd);
+
+if isempty(rStart)
+    fprintf("start value not found\n")
+    nullForce = 0
+elseif isempty(rEnd)
+    fprintf("end value not found")
+    nullForce = 0
+else
+    nullForce = mean(data(rStart:rEnd, 1));
+    taredForceVals = data(:,1)-nullForce;
+end
+
+    plot(data(:,3), data(:,1), 'r-')
+    hold off
+    title('Force Values Only')
+    findpeaks(taredForceVals)
+    [pks,locs,w,p] = findpeaks(taredForceVals);
+
+
+%% find viscosity
+i = 1;
+while pks(i) < 20 ||pks(i+1) < 20 ||pks(i+2) < 20
+    i=i+1;
+end
+peakStart = i;
+while pks(i)>20
+    i=i+1;
+end
+peakEnd = i-1;
+
+%find locations of start and end peaks
+locStart = locs(peakStart);
+locEnd = locs(peakEnd);
+avgForce = mean(taredForceVals(locStart:locEnd));
+avgPressure = avgForce/A;
+viscosity = avgPressure * pi * R^4/(8*L*Q_given);
+
+%% create volume graph
+volFlowRate = (taredForceVals/A) * pi * R^4 / (8 * viscosity * L);
+for i = 1:numel(volFlowRate)
+    if volFlowRate(i) < 0
+        volFlowRate(i) = 0;
+    end
+end
+newData = [data(:,3), volFlowRate];
+plot(data(:,3), volFlowRate)
+
+volumeData = zeros(numel(volFlowRate), 1); 
+volumeData(1) = 0;
+for i = 2:numel(volFlowRate)
+    volumeData(i) = trapz(data(1:i, 3), volFlowRate(1:i));
+end
+
+%% find volumetric average flow rate of each sample
+
+[vfr_pks, vfr_locs] = findpeaks(volFlowRate);
+
+%find starts of each spike
+b = 1;
+for i = 1:numel(vfr_pks)-1
+    if vfr_pks(i) < 1.5 && vfr_pks(i+1) > 1.5
+        spikeStart(b) = vfr_locs(i);
+        b = b + 1;
+    end
+end
+ 
+%find ends of each spike based on vial size and starting point
+interval = vial_size*60;
+
+startVols = volumeData(spikeStart);
+targetFinalVols = startVols + interval;
+
+%find closest values to target final volumes
+finalVols = zeros(numel(startVols), 1);
+for i = 1:numel(startVols)
+    diff = abs(volumeData - targetFinalVols(i));
+    [~, index] = min(diff);
+    finalVols(i) = volumeData(index);
+end
+
+
+% for trials that don't reach expected vial size (ie the next vial starts
+% before needle stopped dripping)
+
+for i = 1:numel(startVols)-1
+    if finalVols(i) > startVols(i+1)
+        finalVols(i) = startVols(i+1);
+    end
+end
+
+plot(volumeData, volFlowRate)
+
+%integrate, average and display on graph
+avgFlowRate = zeros(numel(finalVols), 1);
+for i = 1:numel(avgFlowRate)
+    startPos = find(volumeData == startVols(i));
+    finalPos = find(volumeData == finalVols(i));
+    avgFlowRate(i) = (trapz(volumeData(startPos:finalPos), volFlowRate(startPos:finalPos)))/interval;
+
+    %label on graph
+    labelypos = max(volFlowRate(startPos:finalPos));
+    text(volumeData(startPos), labelypos, num2str(avgFlowRate(i)), 'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'left'); %, 'VerticalAlignment', 'bottom', 'HorizontalAlignment', 'right'
+end
