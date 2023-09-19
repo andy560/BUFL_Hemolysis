@@ -51,6 +51,7 @@ subplot(1, 3, 3);
     plot(data(:,3), data(:,1), 'r-')
     hold off
     title('Force Values Only')
+    drawnow;
 
 
 %% tare force graph
